@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude/planning artifacts
+CHECKLIST.md
+LINKEDIN_POST.md
+PAYMENT_FLOW.md
+PROJECT_SUMMARY.md
+QUICKSTART.md
+recordings/
+*.webm
+
+# Blockchain
+node_modules/
+artifacts/
+cache/
+typechain/
