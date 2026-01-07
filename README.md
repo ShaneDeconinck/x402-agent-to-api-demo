@@ -2,6 +2,8 @@
 
 A proof of concept exploring how incumbents can monetize data assets in an agent economy.
 
+**Demo video:** https://www.youtube.com/watch?v=ocYXPjUdFXg
+
 ## The Gap
 
 **Current Reality:**
@@ -18,7 +20,7 @@ A protocol for agents to autonomously pay for API access without human intervent
 **HTTP 402 (Payment Required)** has existed since 1997 but never had a payment layer that worked.
 
 **Stablecoins** provide that layer:
-- Predictable costs ($0.0001 per query, not volatile crypto)
+- Predictable costs (cents per query, not volatile crypto)
 - Instant settlement (no invoicing)
 - Cryptographic proof (no disputes)
 - Works globally without intermediaries
@@ -31,16 +33,13 @@ Real estate websites already expose data publicly. Scrapers take it for free.
 
 ### Two-Tier API
 
-**Demo pricing** (for testnet demonstration):
-1. **Tier 1: Raw Data** ($0.0001/query) - *Demo only*
-   - Query listings by location/criteria
+1. **Tier 1: Listings** ($0.01/query)
+   - Query listings by neighborhood
    - Returns structured JSON
 
-2. **Tier 2: Valuation Algorithm** ($0.001/query) - *Demo only*
+2. **Tier 2: AI Valuation** ($0.10/query)
    - Proprietary pricing model
-   - Returns valuation + comparables
-
-**Production reality:** Gas on Base is ~$0.007/transaction. Minimum viable pricing is **$0.01/query** to keep gas overhead reasonable. See `PAYMENT_FLOW.md` for detailed economics.
+   - Returns valuation + assessment
 
 ### The Vision
 
