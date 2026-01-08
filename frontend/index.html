@@ -21,13 +21,13 @@
         <div class="modal-content bg-gray-800 border border-gray-600 rounded-xl p-6 max-w-lg mx-4 shadow-2xl">
             <h2 class="text-2xl font-bold text-white mb-4">x402 Protocol Demo</h2>
             <p class="text-gray-300 mb-3">
-                <span class="text-indigo-400 font-semibold">HTTP 402 "Payment Required"</span> has existed since 1997 but was never implemented—until now.
+                <span class="text-indigo-400 font-semibold">HTTP 402 "Payment Required"</span> has existed since 1997 but never had a standard payment layer. Until now.
             </p>
             <p class="text-gray-300 mb-3">
                 With AI agents talking to APIs (and soon other agents), <span class="text-purple-400 font-semibold">machine-to-machine payments</span> become essential. Current API billing wasn't built for this.
             </p>
             <p class="text-gray-300 mb-4">
-                <span class="text-green-400 font-semibold">Coinbase and Cloudflare</span> launched x402 as an open standard. This demo shows a real estate API with proprietary valuations—paid per query with USDC.
+                <span class="text-green-400 font-semibold">Coinbase and Cloudflare</span> launched x402 as an open standard. This demo shows a real estate API with proprietary valuations, paid per query with USDC.
             </p>
             <div class="bg-gray-900 rounded-lg p-4 mb-4 text-sm">
                 <div class="text-gray-400 mb-2">The demo flow:</div>
@@ -183,24 +183,24 @@
 
         // Narration scripts - explainer voiceover style for LinkedIn
         const NARRATIONS = {
-            'init': (data) => `This is a live demo. A real AI agent, a real crypto wallet, calling a real API. Every payment is an actual blockchain transaction.`,
-            'agent_thinking': (data) => `The agent needs San Francisco real estate data. It calls the API.`,
+            'init': (data) => `HTTP 402 has existed since 1997 but never had a standard payment layer. Now Coinbase and Cloudflare are building one. This demo is live. Real agent, real payments.`,
+            'agent_thinking': (data) => `The agent needs real estate data. It calls the API.`,
             'request_tier1': (data) => ``,
-            '402_tier1': (data) => `Instead of data, it gets HTTP 402 - Payment Required. This is x402. The response contains machine-readable payment instructions. Amount, recipient, blockchain network - everything the agent needs to pay.`,
-            'agent_deciding': (data) => `The agent parses these instructions. The price is acceptable. It decides to pay.`,
-            'paying': () => `Now watch - it creates a real USDC payment on Base.`,
+            '402_tier1': (data) => `It gets 402 Payment Required. The response contains machine-readable payment instructions. Amount, recipient, network.`,
+            'agent_deciding': (data) => `The price is acceptable. The agent decides to pay.`,
+            'paying': () => `It signs a payment authorization. Gasless. The server will settle.`,
             'tx_sent': (data) => ``,
-            'tx_confirmed': (data) => `Payment confirmed. The agent has cryptographic proof of payment.`,
+            'tx_confirmed': (data) => `Payment settled on-chain. Cryptographic proof.`,
             'waiting': () => ``,
-            'retry': () => `It retries with the transaction hash as proof.`,
-            'verifying': () => `The server verifies payment on-chain.`,
-            'listings_success': (data) => `Access granted. The agent gets its data.`,
-            'agent_analyzing': (data) => `Now it wants premium valuation data - a more expensive tier.`,
+            'retry': () => `It retries with the payment proof.`,
+            'verifying': () => `Server verifies on-chain.`,
+            'listings_success': (data) => `Access granted.`,
+            'agent_analyzing': (data) => `Now it wants the proprietary valuation. A higher tier.`,
             'request_tier2': () => ``,
-            '402_tier2': (data) => `Same flow. Higher price. The agent decides it's worth it.`,
-            'valuation_success': (data) => `Both data tiers acquired, fully autonomously.`,
+            '402_tier2': (data) => `Same flow. Higher price for proprietary data.`,
+            'valuation_success': (data) => `Both tiers acquired autonomously.`,
             'agent_summary': (data) => ``,
-            'done': (data) => `That's x402. AI agents paying for APIs with stablecoins. No API keys. No human approval. Just code paying code.`,
+            'done': (data) => `That's x402. Machine-to-machine payments for the agent economy.`,
         };
 
         let isSpeaking = false;
