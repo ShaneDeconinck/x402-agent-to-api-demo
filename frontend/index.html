@@ -91,9 +91,9 @@
                     <option value="Sunset">Sunset</option>
                     <option value="Richmond">Richmond</option>
                 </select>
-                <button onclick="toggleAudio()" id="audio-btn" class="p-1.5 rounded border border-gray-600 hover:border-gray-500" title="Toggle narration">
-                    <svg id="audio-on" class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
-                    <svg id="audio-off" class="w-5 h-5 text-gray-500 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path></svg>
+                <button onclick="toggleAudio()" id="audio-btn" class="p-1.5 rounded border border-gray-600 hover:border-gray-500" title="Enable narration & subtitles">
+                    <svg id="audio-on" class="w-5 h-5 text-green-400 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
+                    <svg id="audio-off" class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path></svg>
                 </button>
                                 <button onclick="runDemo()" id="run-btn"
                     class="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 text-white font-bold py-1.5 px-6 rounded text-sm flex items-center gap-2">
@@ -176,7 +176,7 @@
     <script>
         const API_URL = 'http://localhost:8888';
         let txCount = 0;
-        let audioEnabled = true;
+        let audioEnabled = false;  // Off by default - click to enable narration
         let synth = window.speechSynthesis;
 
         // Narration scripts - explainer voiceover style for LinkedIn
@@ -278,7 +278,8 @@
         function showSubtitle(text) {
             const bar = document.getElementById('subtitle-bar');
             const textEl = document.getElementById('subtitle-text');
-            if (text) {
+            // Only show subtitles when narration is enabled
+            if (text && audioEnabled) {
                 // Trigger re-animation by removing and re-adding class
                 textEl.classList.remove('subtitle-text');
                 void textEl.offsetWidth; // Force reflow
