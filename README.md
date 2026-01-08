@@ -182,6 +182,9 @@ BASE_SEPOLIA_RPC=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
 ### Run
 
 ```bash
+# Activate venv (if not already active)
+source venv/bin/activate
+
 # Start API + frontend
 ./start.sh
 ```
