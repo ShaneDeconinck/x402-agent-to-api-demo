@@ -2,7 +2,7 @@
 
 A proof of concept exploring how incumbents can monetize data assets in an agent economy.
 
-**Demo video:** https://www.youtube.com/watch?v=ocYXPjUdFXg
+**Demo video:** https://www.youtube.com/watch?v=wNHUrroN_Hk
 
 ## The Gap
 
@@ -132,6 +132,70 @@ Incumbents don't become AI companies. They monetize what they already have.
 3. **Contract-level nonce** for replay protection
 4. **Tiered monetization** of existing data assets
 5. **Server-side settlement** - agents don't need ETH for gas
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.11+
+- Two MetaMask wallets (agent + recipient)
+- Testnet USDC on Base Sepolia (for agent wallet)
+- Testnet ETH on Base Sepolia (for recipient wallet, to pay gas)
+
+### Setup
+
+```bash
+# Clone the repo
+git clone https://github.com/ShaneDeconinck/x402-agent-to-api-demo.git
+cd x402-agent-to-api-demo
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Copy environment template
+cp .env.example .env
+```
+
+### Configure .env
+
+Edit `.env` with your keys:
+
+```bash
+# Anthropic API key (for the agent)
+ANTHROPIC_API_KEY=your_key
+
+# Agent wallet (pays for API access)
+AGENT_PRIVATE_KEY=64_hex_chars_no_0x
+
+# Recipient wallet (receives payments, settles on-chain)
+RECIPIENT_ADDRESS=0x...
+RECIPIENT_PRIVATE_KEY=64_hex_chars_no_0x
+
+# Optional: Alchemy RPC for faster indexing
+BASE_SEPOLIA_RPC=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
+```
+
+### Run
+
+```bash
+# Start API + frontend
+./start.sh
+```
+
+Opens http://localhost:3000 with the demo UI.
+
+- **Frontend:** http://localhost:3000
+- **API:** http://localhost:8888
+- **API Docs:** http://localhost:8888/docs
+
+### Get Testnet Tokens
+
+1. **Base Sepolia ETH:** https://www.alchemy.com/faucets/base-sepolia
+2. **Base Sepolia USDC:** https://faucet.circle.com/
 
 ## Status
 

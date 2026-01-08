@@ -364,8 +364,8 @@ def run_agent(user_request: str) -> str:
     This demonstrates:
     1. Agent understands natural language request
     2. Agent decides which tools to use
-    3. Agent autonomously creates USDC payments on Base Sepolia
-    4. Agent includes payment proof in x402 headers
+    3. Agent signs EIP-3009 authorizations (gasless)
+    4. Agent includes signed authorization in X-PAYMENT header
     5. Agent synthesizes results into useful response
     """
     agent = RealEstateAgent()

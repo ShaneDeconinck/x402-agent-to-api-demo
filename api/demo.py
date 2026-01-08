@@ -264,7 +264,7 @@ def stream_demo(neighborhood: str):
             yield f"data: {json.dumps({'step': 3, 'action': 'tx_failed', 'message': f'Settlement failed: {error_msg}'})}\n\n"
             return
 
-        # Step 4: Retry with proof
+        # Step 4: Retry with signed authorization
         yield f"data: {json.dumps({'step': 4, 'action': 'retry', 'message': f'Retrying with X-PAYMENT header'})}\n\n"
         time.sleep(1)
 
