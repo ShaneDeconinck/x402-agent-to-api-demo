@@ -2,17 +2,23 @@
 Demo endpoint that runs the full x402 flow and streams results
 This is for filming/demonstration purposes
 
-Uses a DAG-based flow engine for agent reasoning
+Uses EIP-3009 (TransferWithAuthorization) for gasless agent payments.
+Server settles the payment and pays gas.
 """
 import os
 import json
 import time
 import random
+import base64
+import secrets
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 from web3 import Web3
 from eth_account import Account
+from eth_account.messages import encode_typed_data
 from dotenv import load_dotenv
+
+from payment import get_payment_verifier
 
 load_dotenv()
 
@@ -24,16 +30,6 @@ w3 = Web3(Web3.HTTPProvider(os.getenv("BASE_SEPOLIA_RPC", "https://sepolia.base.
 # USDC contract
 USDC_ADDRESS = Web3.to_checksum_address(os.getenv("USDC_CONTRACT_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e"))
 USDC_ABI = [
-    {
-        "constant": False,
-        "inputs": [
-            {"name": "_to", "type": "address"},
-            {"name": "_value", "type": "uint256"}
-        ],
-        "name": "transfer",
-        "outputs": [{"name": "", "type": "bool"}],
-        "type": "function"
-    },
     {
         "constant": True,
         "inputs": [{"name": "_owner", "type": "address"}],
@@ -52,6 +48,88 @@ if AGENT_PRIVATE_KEY and not AGENT_PRIVATE_KEY.startswith("0x"):
 RECIPIENT_ADDRESS = Web3.to_checksum_address(os.getenv("RECIPIENT_ADDRESS"))
 TIER_1_PRICE = 10000  # $0.01 in USDC units
 TIER_2_PRICE = 100000  # $0.10 in USDC units
+
+# EIP-712 domain for USDC on Base Sepolia
+EIP712_DOMAIN = {
+    "name": "USDC",
+    "version": "2",
+    "chainId": 84532,
+    "verifyingContract": USDC_ADDRESS
+}
+
+# EIP-712 types for TransferWithAuthorization
+EIP712_TYPES = {
+    "TransferWithAuthorization": [
+        {"name": "from", "type": "address"},
+        {"name": "to", "type": "address"},
+        {"name": "value", "type": "uint256"},
+        {"name": "validAfter", "type": "uint256"},
+        {"name": "validBefore", "type": "uint256"},
+        {"name": "nonce", "type": "bytes32"},
+    ]
+}
+
+# Payment verifier for settling payments
+payment_verifier = get_payment_verifier()
+
+
+def create_signed_authorization(account: Account, amount: int) -> tuple[str, str]:
+    """
+    Create a signed EIP-3009 authorization (gasless for agent).
+
+    Returns:
+        Tuple of (x_payment_header, nonce_hex)
+    """
+    # Generate random 32-byte nonce
+    nonce = secrets.token_bytes(32)
+    nonce_hex = "0x" + nonce.hex()
+
+    # Time bounds (valid for 5 minutes)
+    current_time = int(time.time())
+    valid_after = current_time
+    valid_before = current_time + 300
+
+    # Build EIP-712 message
+    message = {
+        "from": account.address,
+        "to": RECIPIENT_ADDRESS,
+        "value": amount,
+        "validAfter": valid_after,
+        "validBefore": valid_before,
+        "nonce": nonce,
+    }
+
+    # Create typed data for signing
+    typed_data = {
+        "types": EIP712_TYPES,
+        "primaryType": "TransferWithAuthorization",
+        "domain": EIP712_DOMAIN,
+        "message": message,
+    }
+
+    # Sign with EIP-712
+    signable = encode_typed_data(full_message=typed_data)
+    signed = account.sign_message(signable)
+    signature = "0x" + signed.signature.hex()
+
+    # Build X-PAYMENT payload
+    payload = {
+        "x402Version": 2,
+        "scheme": "exact",
+        "network": "base-sepolia",
+        "signature": signature,
+        "authorization": {
+            "from": account.address,
+            "to": RECIPIENT_ADDRESS,
+            "value": str(amount),
+            "validAfter": str(valid_after),
+            "validBefore": str(valid_before),
+            "nonce": nonce_hex,
+        }
+    }
+
+    x_payment = base64.b64encode(json.dumps(payload).encode()).decode()
+    return x_payment, nonce_hex
 
 
 # ============================================
@@ -140,24 +218,21 @@ def stream_demo(neighborhood: str):
         yield f"data: {json.dumps({'step': 1, 'action': 'request', 'message': f'GET /api/v1/listings?neighborhood={neighborhood}'})}\n\n"
         time.sleep(1)
 
-        # Step 2: 402 Response (structured x402 payment requirements)
+        # Step 2: 402 Response with X-PAYMENT-REQUIRED header (x402 spec)
         x402_response = {
-            "x402_version": "1.0",
-            "payment": {
-                "amount": "10000",
-                "amount_usd": 0.01,
-                "currency": "USDC",
-                "decimals": 6,
-                "recipient": RECIPIENT_ADDRESS,
-                "contract": USDC_ADDRESS,
+            "x402Version": 1,
+            "accepts": [{
+                "scheme": "exact",
                 "network": "base-sepolia",
-                "chain_id": 84532,
-                "proof": {
-                    "header": "X-Payment-Proof",
-                    "type": "transaction_hash"
-                }
-            },
-            "tier": 1
+                "maxAmountRequired": "10000",
+                "resource": "/api/v1/listings",
+                "description": "Pay $0.01 USDC for Tier 1 access",
+                "mimeType": "application/json",
+                "payTo": RECIPIENT_ADDRESS,
+                "maxTimeoutSeconds": 300,
+                "asset": USDC_ADDRESS,
+                "extra": {"name": "USDC", "version": "1"}
+            }]
         }
         yield f"data: {json.dumps({'step': 2, 'action': '402', 'message': 'Payment Required', 'x402': x402_response})}\n\n"
         time.sleep(1)
@@ -167,43 +242,30 @@ def stream_demo(neighborhood: str):
         yield f"data: {json.dumps({'step': 'agent', 'action': 'deciding', 'message': msg})}\n\n"
         time.sleep(1)
 
-        # Step 3: Create payment
-        yield f"data: {json.dumps({'step': 3, 'action': 'paying', 'message': 'Creating USDC payment on Base Sepolia...'})}\n\n"
+        # Step 3: Sign EIP-3009 authorization (gasless for agent)
+        yield f"data: {json.dumps({'step': 3, 'action': 'signing', 'message': 'Signing EIP-712 payment authorization (gasless)...'})}\n\n"
 
-        # Actually create the payment
-        nonce = w3.eth.get_transaction_count(account.address)
-        transfer_function = usdc_contract.functions.transfer(RECIPIENT_ADDRESS, TIER_1_PRICE)
-        gas_estimate = transfer_function.estimate_gas({'from': account.address})
+        # Create signed authorization
+        x_payment, nonce_hex = create_signed_authorization(account, TIER_1_PRICE)
 
-        transaction = transfer_function.build_transaction({
-            'from': account.address,
-            'gas': gas_estimate,
-            'gasPrice': w3.eth.gas_price,
-            'nonce': nonce,
-            'chainId': 84532
-        })
+        yield f"data: {json.dumps({'step': 3, 'action': 'signed', 'nonce': nonce_hex[:18] + '...', 'amount': 0.01, 'message': 'Authorization signed! Server will settle...'})}\n\n"
+        time.sleep(1)
 
-        signed_txn = w3.eth.account.sign_transaction(transaction, AGENT_PRIVATE_KEY)
-        tx_hash = w3.eth.send_raw_transaction(signed_txn.raw_transaction)
-        tx_hash_hex = '0x' + tx_hash.hex()
+        # Server settles the payment via transferWithAuthorization
+        yield f"data: {json.dumps({'step': 3, 'action': 'settling', 'message': 'Server settling payment via transferWithAuthorization...'})}\n\n"
 
-        yield f"data: {json.dumps({'step': 3, 'action': 'tx_sent', 'tx_hash': tx_hash_hex, 'amount': 0.01, 'message': 'Transaction sent, waiting for confirmation...'})}\n\n"
+        settlement = payment_verifier.verify_and_settle(x_payment, tier=1)
 
-        # Wait for confirmation
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-
-        if receipt['status'] == 1:
-            yield f"data: {json.dumps({'step': 3, 'action': 'tx_confirmed', 'tx_hash': tx_hash_hex, 'block': receipt['blockNumber'], 'message': 'Payment confirmed!'})}\n\n"
+        if settlement['valid']:
+            tx_hash_hex = '0x' + settlement['tx_hash'] if not settlement['tx_hash'].startswith('0x') else settlement['tx_hash']
+            yield f"data: {json.dumps({'step': 3, 'action': 'tx_confirmed', 'tx_hash': tx_hash_hex, 'block': settlement.get('block_number'), 'message': 'Payment settled!'})}\n\n"
         else:
-            yield f"data: {json.dumps({'step': 3, 'action': 'tx_failed', 'message': 'Transaction failed'})}\n\n"
+            error_msg = settlement.get("error", "Unknown error")
+            yield f"data: {json.dumps({'step': 3, 'action': 'tx_failed', 'message': f'Settlement failed: {error_msg}'})}\n\n"
             return
 
-        # Wait for RPC to index
-        yield f"data: {json.dumps({'step': 3, 'action': 'waiting', 'message': 'Waiting for block indexing (10s)...'})}\n\n"
-        time.sleep(10)
-
         # Step 4: Retry with proof
-        yield f"data: {json.dumps({'step': 4, 'action': 'retry', 'message': f'Retrying with X-Payment-Proof header'})}\n\n"
+        yield f"data: {json.dumps({'step': 4, 'action': 'retry', 'message': f'Retrying with X-PAYMENT header'})}\n\n"
         time.sleep(1)
 
         # Step 5: Verify and get data
@@ -242,17 +304,21 @@ def stream_demo(neighborhood: str):
 
             # 402 for Tier 2
             x402_tier2 = {
-                "x402_version": "1.0",
-                "payment": {
-                    "amount": "100000",
-                    "amount_usd": 0.10,
-                    "currency": "USDC",
-                    "recipient": RECIPIENT_ADDRESS,
-                    "proof": {"header": "X-Payment-Proof"}
-                },
-                "tier": 2
+                "x402Version": 1,
+                "accepts": [{
+                    "scheme": "exact",
+                    "network": "base-sepolia",
+                    "maxAmountRequired": "100000",
+                    "resource": "/api/v1/valuation",
+                    "description": "Pay $0.10 USDC for Tier 2 access",
+                    "mimeType": "application/json",
+                    "payTo": RECIPIENT_ADDRESS,
+                    "maxTimeoutSeconds": 300,
+                    "asset": USDC_ADDRESS,
+                    "extra": {"name": "USDC", "version": "1"}
+                }]
             }
-            yield f"data: {json.dumps({'step': 7, 'action': '402', 'message': 'Payment Required - Tier 2', 'x402': x402_tier2})}\n\n"
+            yield f"data: {json.dumps({'step': 7, 'action': '402', 'message': 'Payment Required', 'x402': x402_tier2})}\n\n"
             time.sleep(1)
 
             # DAG: handle_402_tier2
@@ -260,34 +326,26 @@ def stream_demo(neighborhood: str):
             yield f"data: {json.dumps({'step': 'agent', 'action': 'deciding', 'message': msg})}\n\n"
             time.sleep(1)
 
-            # Create Tier 2 payment
-            yield f"data: {json.dumps({'step': 8, 'action': 'paying', 'message': 'Creating $0.10 USDC payment...'})}\n\n"
+            # Sign Tier 2 authorization (gasless for agent)
+            yield f"data: {json.dumps({'step': 8, 'action': 'signing', 'message': 'Signing $0.10 authorization (gasless)...'})}\n\n"
 
-            nonce = w3.eth.get_transaction_count(account.address)
-            transfer_function = usdc_contract.functions.transfer(RECIPIENT_ADDRESS, TIER_2_PRICE)
-            gas_estimate = transfer_function.estimate_gas({'from': account.address})
+            x_payment_2, nonce_hex_2 = create_signed_authorization(account, TIER_2_PRICE)
 
-            transaction = transfer_function.build_transaction({
-                'from': account.address,
-                'gas': gas_estimate,
-                'gasPrice': w3.eth.gas_price,
-                'nonce': nonce,
-                'chainId': 84532
-            })
+            yield f"data: {json.dumps({'step': 8, 'action': 'signed', 'nonce': nonce_hex_2[:18] + '...', 'amount': 0.10, 'message': 'Authorization signed! Server will settle...'})}\n\n"
+            time.sleep(1)
 
-            signed_txn = w3.eth.account.sign_transaction(transaction, AGENT_PRIVATE_KEY)
-            tx_hash_2 = w3.eth.send_raw_transaction(signed_txn.raw_transaction)
-            tx_hash_2_hex = '0x' + tx_hash_2.hex()
+            # Server settles the payment
+            yield f"data: {json.dumps({'step': 8, 'action': 'settling', 'message': 'Server settling Tier 2 payment...'})}\n\n"
 
-            yield f"data: {json.dumps({'step': 8, 'action': 'tx_sent', 'tx_hash': tx_hash_2_hex, 'amount': 0.10, 'message': 'Tier 2 payment sent...'})}\n\n"
+            settlement_2 = payment_verifier.verify_and_settle(x_payment_2, tier=2)
 
-            receipt_2 = w3.eth.wait_for_transaction_receipt(tx_hash_2, timeout=120)
-
-            if receipt_2['status'] == 1:
-                yield f"data: {json.dumps({'step': 8, 'action': 'tx_confirmed', 'tx_hash': tx_hash_2_hex, 'block': receipt_2['blockNumber'], 'message': 'Payment confirmed!'})}\n\n"
-
-            yield f"data: {json.dumps({'step': 8, 'action': 'waiting', 'message': 'Waiting for block indexing (10s)...'})}\n\n"
-            time.sleep(10)
+            if settlement_2['valid']:
+                tx_hash_2_hex = '0x' + settlement_2['tx_hash'] if not settlement_2['tx_hash'].startswith('0x') else settlement_2['tx_hash']
+                yield f"data: {json.dumps({'step': 8, 'action': 'tx_confirmed', 'tx_hash': tx_hash_2_hex, 'block': settlement_2.get('block_number'), 'message': 'Tier 2 payment settled!'})}\n\n"
+            else:
+                error_msg_2 = settlement_2.get("error", "Unknown error")
+                yield f"data: {json.dumps({'step': 8, 'action': 'tx_failed', 'message': f'Settlement failed: {error_msg_2}'})}\n\n"
+                return
 
             # Valuation response
             valuation = {
@@ -315,7 +373,7 @@ def stream_demo(neighborhood: str):
         new_balance_usd = new_balance / 1_000_000
         total_spent = balance_usd - new_balance_usd
 
-        yield f"data: {json.dumps({'step': 'done', 'tx_hash': tx_hash_hex, 'tx_hash_2': tx_hash_2_hex if listings else None, 'total_spent': total_spent, 'new_balance': new_balance_usd, 'basescan_url': f'https://sepolia.basescan.org/tx/{tx_hash_hex}'})}\n\n"
+        yield f"data: {json.dumps({'step': 'done', 'tx_hash': tx_hash_hex, 'tx_hash_2': tx_hash_2_hex if listings else None, 'total_spent': total_spent, 'new_balance': new_balance_usd, 'basescan_url': f'https://sepolia.basescan.org/tx/{tx_hash_hex}', 'note': 'Agent signed authorizations (gasless), server settled via EIP-3009'})}\n\n"
 
     except Exception as e:
         yield f"data: {json.dumps({'step': 'error', 'message': str(e)})}\n\n"

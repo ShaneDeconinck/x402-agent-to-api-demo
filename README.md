@@ -19,10 +19,12 @@ A protocol for agents to autonomously pay for API access without human intervent
 
 **HTTP 402 (Payment Required)** has existed since 1997 but never had a payment layer that worked.
 
-**Stablecoins** provide that layer:
+**Stablecoins + EIP-3009** provide that layer:
 - Predictable costs (cents per query, not volatile crypto)
+- **Gasless for agents** - Sign authorization, server settles
 - Instant settlement (no invoicing)
 - Cryptographic proof (no disputes)
+- **Built-in replay protection** - Contract-level nonce tracking
 - Works globally without intermediaries
 
 ## The Model
@@ -55,46 +57,52 @@ Incumbents don't become AI companies. They monetize what they already have.
 ```
 ┌─────────────────┐
 │  Agent (Claude) │
-│  via Anthropic  │
-│      SDK        │
+│  Signs EIP-712  │
+│  (no gas!)      │
 └────────┬────────┘
          │
-         │ 1. Discovers service
-         │    via Registry
-         ▼
-┌─────────────────┐
-│    Registry     │
-│   (Base L2)     │
-│  Smart Contract │
-└────────┬────────┘
-         │
-         │ 2. Queries API
-         │    with x402 header
+         │ 1. GET /listings → 402 Payment Required
+         │ 2. Agent signs TransferWithAuthorization
+         │ 3. GET /listings + X-PAYMENT header
          ▼
 ┌─────────────────┐
 │   FastAPI with  │
-│ x402 Verification│
+│ x402 + EIP-3009 │
 ├─────────────────┤
-│  Tier 1: Query  │
-│  Tier 2: Value  │
+│  Verifies sig   │
+│  Calls USDC     │
+│  transferWith-  │
+│  Authorization  │
+│  (server pays   │
+│   gas)          │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│  SQLite + Algo  │
-│ (Proprietary IP)│
+│   USDC Contract │
+│   (Base Sepolia)│
+│  Checks nonce,  │
+│  transfers USDC │
 └─────────────────┘
 ```
+
+### EIP-3009 Flow
+
+1. **Agent signs** EIP-712 `TransferWithAuthorization` message (gasless)
+2. **Server receives** signature + authorization in `X-PAYMENT` header
+3. **Server calls** `USDC.transferWithAuthorization()` (pays gas)
+4. **Contract verifies** signature, checks nonce not used, transfers USDC
+5. **Server returns** data
 
 ## Tech Stack
 
 - **API:** FastAPI (Python)
 - **Database:** SQLite with mock listings
 - **Algorithm:** Simple but realistic valuation model
-- **Payment:** USDC on Base testnet
-- **Registry:** Solidity smart contract
-- **Agent:** Anthropic SDK
-- **Frontend:** Simple demo interface
+- **Payment:** USDC on Base Sepolia via EIP-3009
+- **Signing:** EIP-712 (eth_account)
+- **Agent:** Anthropic SDK (gasless - only signs)
+- **Frontend:** Tailwind CSS demo interface
 
 ## Trade-offs
 
@@ -103,20 +111,27 @@ Incumbents don't become AI companies. They monetize what they already have.
 - Pay-per-query makes bulk extraction expensive
 - The bet: Value of agent accessibility > cost of extraction
 
-**Gas fees are the constraint:**
-- Base gas: ~$0.007/transaction
-- Minimum viable pricing: $0.01/query
-- Solutions: Batching, higher tiers, or gas sponsorship (at cost of platform lock-in)
+**Gas fees paid by server:**
+- Server pays ~$0.007/transaction to settle
+- Agent pays $0 gas (only signs)
+- Server must price queries to cover gas overhead
+- At $0.01/query: 70% gas overhead
+- At $0.10/query: 7% gas overhead
+
+**Replay protection built-in:**
+- EIP-3009 nonce tracked by USDC contract
+- Each authorization can only be used once
+- No server-side tracking needed
 
 **Real estate sites already expose data publicly.** This model monetizes access instead of fighting it.
 
 ## What This Demonstrates
 
-1. **x402 as a protocol** for agent payments
+1. **x402 + EIP-3009** for gasless agent payments
 2. **Stablecoins** as enterprise-friendly settlement layer
-3. **Registry pattern** for service discovery
+3. **Contract-level nonce** for replay protection
 4. **Tiered monetization** of existing data assets
-5. **Clear separation** between data providers (incumbents) and experience builders (AI companies)
+5. **Server-side settlement** - agents don't need ETH for gas
 
 ## Status
 

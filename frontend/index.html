@@ -480,15 +480,28 @@
                                 log(`Creating payment...`, 'payment');
                                 await narrate('paying', data);
                             }
+                            else if (data.action === 'signing') {
+                                log(`Signing EIP-712 authorization (gasless)...`, 'payment');
+                                await narrate('paying', data);
+                            }
+                            else if (data.action === 'signed') {
+                                log(`✓ Signed (nonce: ${data.nonce})`, 'tx');
+                            }
+                            else if (data.action === 'settling') {
+                                log(`Server settling via transferWithAuthorization...`, 'info');
+                            }
                             else if (data.action === 'tx_sent') {
                                 log(`Tx: ${data.tx_hash.slice(0,20)}...`, 'tx');
                                 addTransaction(data.tx_hash, data.amount || 0.01);
                                 await narrate('tx_sent', data);
                             }
                             else if (data.action === 'tx_confirmed') {
-                                log(`✓ Confirmed block ${data.block}`, 'success');
-                                updateTxStatus(txCount, 'confirmed');
+                                log(`✓ Settled! Block ${data.block}`, 'success');
+                                addTransaction(data.tx_hash, data.amount || (data.step === 3 ? 0.01 : 0.10), 'confirmed');
                                 await narrate('tx_confirmed', data);
+                            }
+                            else if (data.action === 'tx_failed') {
+                                log(`✗ ${data.message}`, 'error');
                             }
                             else if (data.action === 'waiting') {
                                 log(`Waiting for indexing...`, 'info');
@@ -496,7 +509,7 @@
                             }
                         }
                         else if (data.step === 4) {
-                            log(`Retry with X-Payment-Proof`, 'tx');
+                            log(`Retry with X-PAYMENT header`, 'tx');
                             await narrate('retry', data);
                         }
                         else if (data.step === 5) {

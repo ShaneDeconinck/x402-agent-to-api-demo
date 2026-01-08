@@ -3,16 +3,20 @@ Real Estate Agent using Anthropic SDK
 
 Demonstrates:
 - Service discovery via registry
-- Autonomous payment via x402
+- Autonomous payment via x402 (EIP-3009 gasless)
 - Tool use to query APIs
 - Decision making based on data
 """
 import os
 import httpx
+import json
+import base64
+import secrets
 from anthropic import Anthropic
 from typing import Dict, List
 from web3 import Web3
 from eth_account import Account
+from eth_account.messages import encode_typed_data
 import time
 from dotenv import load_dotenv
 
@@ -31,18 +35,8 @@ w3 = Web3(Web3.HTTPProvider(os.getenv("BASE_SEPOLIA_RPC", "https://sepolia.base.
 # USDC contract on Base Sepolia
 USDC_ADDRESS = Web3.to_checksum_address(os.getenv("USDC_CONTRACT_ADDRESS", "0x036CbD53842c5426634e7929541eC2318f3dCF7e"))
 
-# ERC20 ABI (minimal - just what we need)
+# ERC20 ABI (minimal - just balanceOf for checking balance)
 USDC_ABI = [
-    {
-        "constant": False,
-        "inputs": [
-            {"name": "_to", "type": "address"},
-            {"name": "_value", "type": "uint256"}
-        ],
-        "name": "transfer",
-        "outputs": [{"name": "", "type": "bool"}],
-        "type": "function"
-    },
     {
         "constant": True,
         "inputs": [{"name": "_owner", "type": "address"}],
@@ -64,8 +58,28 @@ if AGENT_PRIVATE_KEY and not AGENT_PRIVATE_KEY.startswith("0x"):
 RECIPIENT_ADDRESS = Web3.to_checksum_address(os.getenv("RECIPIENT_ADDRESS"))
 
 # Pricing (must match API)
-TIER_1_PRICE = 100  # $0.0001 in USDC (6 decimals)
-TIER_2_PRICE = 1000  # $0.001 in USDC
+TIER_1_PRICE = 10000   # $0.01 in USDC (6 decimals)
+TIER_2_PRICE = 100000  # $0.10 in USDC
+
+# EIP-712 domain for USDC on Base Sepolia
+EIP712_DOMAIN = {
+    "name": "USDC",
+    "version": "2",
+    "chainId": 84532,  # Base Sepolia
+    "verifyingContract": USDC_ADDRESS
+}
+
+# EIP-712 types for TransferWithAuthorization
+EIP712_TYPES = {
+    "TransferWithAuthorization": [
+        {"name": "from", "type": "address"},
+        {"name": "to", "type": "address"},
+        {"name": "value", "type": "uint256"},
+        {"name": "validAfter", "type": "uint256"},
+        {"name": "validBefore", "type": "uint256"},
+        {"name": "nonce", "type": "bytes32"},
+    ]
+}
 
 
 class RealEstateAgent:
@@ -96,62 +110,81 @@ class RealEstateAgent:
 
     def create_payment(self, tier: int) -> str:
         """
-        Create USDC payment transaction on Base Sepolia
+        Create signed EIP-3009 authorization for USDC payment (gasless).
+
+        Per x402 spec:
+        - Agent signs EIP-712 TransferWithAuthorization
+        - Returns base64-encoded JSON payload for X-PAYMENT header
+        - Server settles via transferWithAuthorization (pays gas)
+        - Contract nonce prevents replay attacks
 
         Args:
-            tier: 1 for data query ($0.0001), 2 for valuation ($0.001)
+            tier: 1 for data query ($0.01), 2 for valuation ($0.10)
 
         Returns:
-            Transaction hash
+            Base64-encoded X-PAYMENT payload
         """
         amount = TIER_1_PRICE if tier == 1 else TIER_2_PRICE
         amount_usd = amount / 1_000_000
 
-        print(f"💸 Creating payment: ${amount_usd} USDC to {RECIPIENT_ADDRESS[:10]}...")
+        print(f"💸 Signing payment authorization: ${amount_usd} USDC to {RECIPIENT_ADDRESS[:10]}...")
 
-        # Build transaction
-        nonce = w3.eth.get_transaction_count(self.account.address)
+        # Generate random 32-byte nonce (EIP-3009 requirement)
+        nonce = secrets.token_bytes(32)
+        nonce_hex = "0x" + nonce.hex()
 
-        # Create USDC transfer transaction
-        transfer_function = usdc_contract.functions.transfer(RECIPIENT_ADDRESS, amount)
+        # Time bounds (valid for 5 minutes)
+        current_time = int(time.time())
+        valid_after = current_time
+        valid_before = current_time + 300  # 5 minutes
 
-        # Estimate gas
-        gas_estimate = transfer_function.estimate_gas({'from': self.account.address})
+        # Build EIP-712 message
+        message = {
+            "from": self.account.address,
+            "to": RECIPIENT_ADDRESS,
+            "value": amount,
+            "validAfter": valid_after,
+            "validBefore": valid_before,
+            "nonce": nonce,
+        }
 
-        # Build transaction
-        transaction = transfer_function.build_transaction({
-            'from': self.account.address,
-            'gas': gas_estimate,
-            'gasPrice': w3.eth.gas_price,
-            'nonce': nonce,
-            'chainId': 84532  # Base Sepolia
-        })
+        # Create typed data for signing
+        typed_data = {
+            "types": EIP712_TYPES,
+            "primaryType": "TransferWithAuthorization",
+            "domain": EIP712_DOMAIN,
+            "message": message,
+        }
 
-        # Sign transaction
-        signed_txn = w3.eth.account.sign_transaction(transaction, AGENT_PRIVATE_KEY)
+        # Sign with EIP-712
+        signable = encode_typed_data(full_message=typed_data)
+        signed = self.account.sign_message(signable)
+        signature = signed.signature.hex()
 
-        # Send transaction
-        tx_hash = w3.eth.send_raw_transaction(signed_txn.raw_transaction)
-        tx_hash_hex = tx_hash.hex()
+        print(f"   ✓ Authorization signed (nonce: {nonce_hex[:18]}...)")
+        print(f"   Valid for 5 minutes (until {valid_before})")
 
-        print(f"   Transaction sent: {tx_hash_hex[:20]}...")
-        print(f"   Waiting for confirmation...")
+        # Build X-PAYMENT payload per x402 spec
+        payload = {
+            "x402Version": 2,
+            "scheme": "exact",
+            "network": "base-sepolia",
+            "signature": "0x" + signature,
+            "authorization": {
+                "from": self.account.address,
+                "to": RECIPIENT_ADDRESS,
+                "value": str(amount),
+                "validAfter": str(valid_after),
+                "validBefore": str(valid_before),
+                "nonce": nonce_hex,
+            }
+        }
 
-        # Wait for transaction receipt
-        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
-
-        if receipt['status'] == 1:
-            print(f"   ✓ Payment confirmed!")
-            print(f"   View on BaseScan: https://sepolia.basescan.org/tx/{tx_hash_hex}")
-            # Wait for RPC node to index the block (public nodes are slow)
-            print(f"   ⏳ Waiting 20s for block propagation...")
-            time.sleep(20)
-        else:
-            print(f"   ✗ Payment failed!")
-            raise Exception("Payment transaction failed")
+        # Base64 encode for X-PAYMENT header
+        x_payment = base64.b64encode(json.dumps(payload).encode()).decode()
 
         print()
-        return tx_hash_hex
+        return x_payment
 
     def discover_service(self) -> Dict:
         """
@@ -166,13 +199,14 @@ class RealEstateAgent:
     def query_listings(self, neighborhood: str = None, property_type: str = None,
                       min_price: int = None, max_price: int = None, bedrooms: int = None) -> Dict:
         """
-        Query listings (Tier 1 - $0.0001)
+        Query listings (Tier 1 - $0.01)
 
-        Follows x402 protocol:
+        Follows x402 protocol with EIP-3009:
         1. Try API call without payment
         2. Server returns 402 Payment Required
-        3. Create payment based on server's requirements
-        4. Retry with payment proof
+        3. Sign EIP-712 authorization (gasless)
+        4. Retry with X-PAYMENT header
+        5. Server settles via transferWithAuthorization
         """
         params = {}
         if neighborhood:
@@ -197,18 +231,16 @@ class RealEstateAgent:
         if response.status_code == 402:
             payment_info = response.json()
             print(f"   ← 402 Payment Required")
-            print(f"   Server requests: ${payment_info.get('price_usd', 0)} USDC")
+            print(f"   Server requests: $0.01 USDC")
             print()
 
-            # Step 3: Create payment as requested by server
-            tx_hash = self.create_payment(tier=1)
+            # Step 3: Create signed authorization (gasless for agent)
+            x_payment = self.create_payment(tier=1)
 
-            # Step 4: Retry with payment proof
-            headers = {
-                "X-Payment-Proof": tx_hash
-            }
+            # Step 4: Retry with X-PAYMENT header
+            headers = {"X-PAYMENT": x_payment}
 
-            print(f"🔍 Retrying API call with payment proof...")
+            print(f"🔍 Retrying API call with signed authorization...")
             response = self.http_client.get(
                 f"{self.api_base}/api/v1/listings",
                 params=params,
@@ -224,13 +256,14 @@ class RealEstateAgent:
 
     def get_valuation(self, address: str) -> Dict:
         """
-        Get property valuation (Tier 2 - $0.001)
+        Get property valuation (Tier 2 - $0.10)
 
-        Follows x402 protocol:
+        Follows x402 protocol with EIP-3009:
         1. Try API call without payment
         2. Server returns 402 Payment Required
-        3. Create payment based on server's requirements
-        4. Retry with payment proof
+        3. Sign EIP-712 authorization (gasless)
+        4. Retry with X-PAYMENT header
+        5. Server settles via transferWithAuthorization
         """
         # Step 1: Try without payment (will get 402)
         print(f"🔍 Getting valuation (first attempt)...")
@@ -243,18 +276,16 @@ class RealEstateAgent:
         if response.status_code == 402:
             payment_info = response.json()
             print(f"   ← 402 Payment Required")
-            print(f"   Server requests: ${payment_info.get('price_usd', 0)} USDC")
+            print(f"   Server requests: $0.10 USDC")
             print()
 
-            # Step 3: Create payment as requested by server
-            tx_hash = self.create_payment(tier=2)
+            # Step 3: Create signed authorization (gasless for agent)
+            x_payment = self.create_payment(tier=2)
 
-            # Step 4: Retry with payment proof
-            headers = {
-                "X-Payment-Proof": tx_hash
-            }
+            # Step 4: Retry with X-PAYMENT header
+            headers = {"X-PAYMENT": x_payment}
 
-            print(f"🔍 Retrying with payment proof...")
+            print(f"🔍 Retrying with signed authorization...")
             response = self.http_client.get(
                 f"{self.api_base}/api/v1/valuation",
                 params={"address": address},
